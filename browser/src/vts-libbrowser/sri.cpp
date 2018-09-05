@@ -91,11 +91,14 @@ void SriIndex::load()
             // cache the metatile
             {
                 Buffer buffer(contentEnd - contentStart);
-                memcpy(buffer.data(), fetch->reply.content.data() + contentStart,
+                memcpy(buffer.data(),
+                       fetch->reply.content.data() + contentStart,
                        buffer.size());
-                map->resources.cache->write(m->name, buffer, m->fetch->reply.expires);
+                map->resources.cache->write(m->name, buffer,
+                       m->fetch->reply.expires);
             }
-            m->state = Resource::State::ready;
+            m->state.store(Resource::State::ready,
+                           std::memory_order_release);
             metatiles.push_back(m);
         }
     }

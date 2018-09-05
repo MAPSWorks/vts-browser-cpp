@@ -71,7 +71,7 @@ std::string uniqueName()
 {
     static std::atomic<uint32> tmpIndex;
     std::ostringstream ss;
-    ss << pid << "_" << (tmpIndex++);
+    ss << pid << "_" << (tmpIndex.fetch_add(1, std::memory_order_relaxed));
     return ss.str();
 }
 

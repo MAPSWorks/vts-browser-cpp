@@ -78,7 +78,7 @@ Validity MapImpl::getResourceValidity(const std::string &name)
 Validity MapImpl::getResourceValidity(
     const std::shared_ptr<Resource> &resource)
 {
-    switch ((Resource::State)resource->state)
+    switch (resource->state.load(std::memory_order_acquire))
     {
     case Resource::State::errorFatal:
     case Resource::State::availFail:

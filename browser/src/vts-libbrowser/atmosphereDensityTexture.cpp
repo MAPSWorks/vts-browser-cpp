@@ -60,7 +60,8 @@ void generateAtmosphereTexture(
     // mark the texture ready
     {
         tex->info.ramMemoryCost = tex->fetch->reply.content.size();
-        tex->state = Resource::State::downloaded;
+        tex->state.store(Resource::State::downloaded,
+                         std::memory_order_release);
         tex->map->resources.queUpload.push(tex);
     }
 
@@ -137,7 +138,8 @@ void MapImpl::resourcesAtmosphereGeneratorEntry()
         }
         catch (const std::exception &)
         {
-            r->state = Resource::State::errorFatal;
+            r->state.store(Resource::State::errorFatal,
+                           std::memory_order_relaxed);
         }
     }
 }
@@ -148,7 +150,7 @@ void MapImpl::updateAtmosphereDensity()
         = mapConfig->atmosphereDensityTexture;
     assert(tex);
     touchResource(tex);
-    switch ((Resource::State)tex->state)
+    switch (tex->state.load(std::memory_order_relaxed))
     {
     case Resource::State::errorRetry:
     case Resource::State::availFail:
@@ -157,7 +159,8 @@ void MapImpl::updateAtmosphereDensity()
         return;
     }
 
-    tex->state = Resource::State::downloading;
+    tex->state.store(Resource::State::downloading,
+                     std::memory_order_relaxed);
     resources.queAtmosphere.push(tex);
 }
 

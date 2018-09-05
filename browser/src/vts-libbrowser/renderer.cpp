@@ -384,12 +384,16 @@ bool MapImpl::prerequisitesCheck()
     if (!resources.authPath.empty())
     {
         resources.auth = getAuthConfig(resources.authPath);
-        if (!testAndThrow(resources.auth->state, "Authentication failure."))
+        if (!testAndThrow(
+                resources.auth->state.load(std::memory_order_relaxed),
+                "Authentication failure."))
             return false;
     }
 
     mapConfig = getMapConfig(mapConfigPath);
-    if (!testAndThrow(mapConfig->state, "Map config failure."))
+    if (!testAndThrow(
+                mapConfig->state.load(std::memory_order_acquire),
+                "Map config failure."))
         return false;
 
     if (!mapconfigAvailable)

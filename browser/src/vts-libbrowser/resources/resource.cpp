@@ -119,12 +119,13 @@ void Resource::updateAvailability(const std::shared_ptr<vtslibs::registry
 void Resource::forceRedownload()
 {
     retryNumber = 0;
-    state = Resource::State::errorRetry;
+    state.store(Resource::State::errorRetry,
+                std::memory_order_release);
 }
 
 Resource::operator bool() const
 {
-    return state == Resource::State::ready;
+    return state.load(std::memory_order_acquire) == Resource::State::ready;
 }
 
 std::ostream &operator << (std::ostream &stream, Resource::State state)

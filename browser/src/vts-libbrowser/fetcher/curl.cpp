@@ -127,7 +127,8 @@ public:
 };
 
 Task::Task(FetcherImpl *impl, const std::shared_ptr<FetchTask> &task)
-    : begin(impl->time()), impl(impl), id(impl->taskId++),
+    : begin(impl->time()), impl(impl),
+      id(impl->taskId.fetch_add(1, std::memory_order_relaxed)),
       query(task->query.url), task(task), called(false)
 {
     query.timeout(impl->options.timeout);

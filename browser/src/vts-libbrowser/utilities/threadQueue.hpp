@@ -61,7 +61,7 @@ namespace vts
         bool tryPop(T &v)
         {
             boost::mutex::scoped_lock lock(mut);
-            if (q.empty() || stop)
+            if (q.empty() || stop.load(std::memory_order_relaxed))
                 return false;
             v = std::move(q.front());
             q.pop_front();
@@ -71,7 +71,7 @@ namespace vts
         bool waitPop(T &v)
         {
             boost::mutex::scoped_lock lock(mut);
-            while (q.empty() && !stop)
+            while (q.empty() && !stop.load(std::memory_order_relaxed))
                 con.wait(lock);
             if (q.empty())
                 return false;
@@ -82,7 +82,7 @@ namespace vts
 
         void terminate()
         {
-            stop = true;
+            stop.store(true, std::memory_order_relaxed);
             con.notify_all();
         }
 

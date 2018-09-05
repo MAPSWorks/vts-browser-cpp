@@ -71,7 +71,8 @@ AuthConfig::AuthConfig(MapImpl *map, const std::string &name) :
         token = name.substr(tokenPrefix.size());
         timeParsed = currentTime();
         timeValid = (uint64)60 * 60 * 24 * 365 * 100;
-        state = Resource::State::ready;
+        state.store(Resource::State::ready,
+                    std::memory_order_release);
     }
 }
 
@@ -120,13 +121,14 @@ FetchTask::ResourceType AuthConfig::resourceType() const
 
 void AuthConfig::checkTime()
 {
-    if (state == Resource::State::ready)
+    if (state.load(std::memory_order_acquire) == Resource::State::ready)
     {
         uint64 t = currentTime();
         if (t + 60 > timeParsed + timeValid)
         {
             // force redownload
-            state = Resource::State::initializing;
+            state.store(Resource::State::initializing,
+                        std::memory_order_relaxed);
         }
     }
 }

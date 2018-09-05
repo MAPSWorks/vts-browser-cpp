@@ -123,7 +123,8 @@ BoundInfo *MapConfig::getBoundInfo(const std::string &id)
             std::string url = convertPath(bl->url, name);
             std::shared_ptr<ExternalBoundLayer> r
                     = map->getExternalBoundLayer(url);
-            if (!testAndThrow(r->state, "External bound layer failure."))
+            if (!testAndThrow(r->state.load(std::memory_order_relaxed),
+                        "External bound layer failure."))
                 return nullptr;
             boundInfos[bl->id] = std::make_shared<BoundInfo>(*r, url);
 
@@ -156,7 +157,8 @@ FreeInfo *MapConfig::getFreeInfo(const std::string &id)
             std::string url = convertPath(bl->externalUrl(), name);
             std::shared_ptr<ExternalFreeLayer> r
                     = map->getExternalFreeLayer(url);
-            if (!testAndThrow(r->state, "External free layer failure."))
+            if (!testAndThrow(r->state.load(std::memory_order_relaxed),
+                            "External free layer failure."))
                 return nullptr;
             freeInfos[bl->id] = std::make_shared<FreeInfo>(*r, url);
 

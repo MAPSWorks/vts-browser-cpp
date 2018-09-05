@@ -120,7 +120,8 @@ bool MapLayer::prerequisitesCheckMainSurfaces()
                 continue;
             auto tilesetMapping = map->getTilesetMapping(
                     convertPath(it.mapping, mapConfig->name));
-            if (!testAndThrow(tilesetMapping->state,
+            if (!testAndThrow(
+                    tilesetMapping->state.load(std::memory_order_relaxed),
                               "Tileset mapping failure."))
                 return false;
             surfaceStack.generateVirtual(map, &it);

@@ -46,7 +46,7 @@ void FetchTaskImpl::fetchDone()
 {
     LOG(debug) << "Resource <" << name << "> finished downloading";
     assert(map);
-    map->resources.downloads--;
+    map->resources.downloads.fetch_add(-1, std::memory_order_relaxed);
     Resource::State state = Resource::State::downloading;
 
     // handle error or invalid codes
@@ -110,9 +110,10 @@ void FetchTaskImpl::fetchDone()
         if (rs)
         {
             assert(&*rs->fetch == this);
-            assert(rs->state == Resource::State::downloading);
+            assert(rs->state.load(std::memory_order_relaxed)
+                == Resource::State::downloading);
             rs->info.ramMemoryCost = reply.content.size();
-            rs->state = state;
+            rs->state.store(state, std::memory_order_release);
             if (state == Resource::State::downloaded)
                 map->resources.queUpload.push(rs);
         }
@@ -130,13 +131,15 @@ void FetchTaskImpl::fetchDone()
 
 void MapImpl::resourceUploadProcess(const std::shared_ptr<Resource> &r)
 {
-    assert(r->state == Resource::State::downloaded);
+    assert(r->state.load(std::memory_order_relaxed)
+        == Resource::State::downloaded);
     r->info.gpuMemoryCost = r->info.ramMemoryCost = 0;
     statistics.resourcesProcessed++;
     try
     {
         r->load();
-        r->state = Resource::State::ready;
+        r->state.store(Resource::State::ready,
+                       std::memory_order_release);
     }
     catch (const std::exception &e)
     {
@@ -161,7 +164,8 @@ void MapImpl::resourceUploadProcess(const std::shared_ptr<Resource> &r)
             }
         }
         statistics.resourcesFailed++;
-        r->state = Resource::State::errorFatal;
+        r->state.store(Resource::State::errorFatal,
+                       std::memory_order_release);
     }
     r->fetch.reset();
 }
@@ -243,7 +247,8 @@ void MapImpl::cacheReadEntry()
         catch (const std::exception &e)
         {
             statistics.resourcesFailed++;
-            r->state = Resource::State::errorFatal;
+            r->state.store(Resource::State::errorFatal,
+                           std::memory_order_release);
             LOG(err3) << "Failed preparing resource <" << r->name
                 << ">, exception <" << e.what() << ">";
         }
@@ -262,7 +267,8 @@ bool startsWith(const std::string &text, const std::string &start)
 
 void MapImpl::cacheReadProcess(const std::shared_ptr<Resource> &r)
 {
-    assert(r->state == Resource::State::checkCache);
+    assert(r->state.load(std::memory_order_relaxed)
+        == Resource::State::checkCache);
     if (!r->fetch)
         r->fetch = std::make_shared<FetchTaskImpl>(r);
     r->info.gpuMemoryCost = r->info.ramMemoryCost = 0;
@@ -271,36 +277,41 @@ void MapImpl::cacheReadProcess(const std::shared_ptr<Resource> &r)
         r->fetch->reply.expires))
     {
         statistics.resourcesDiskLoaded++;
-        if (r->fetch->reply.content.size() > 0)
-            r->state = Resource::State::downloaded;
-        else
-            r->state = Resource::State::availFail;
         r->fetch->reply.code = 200;
+        r->state.store(r->fetch->reply.content.size() > 0
+                       ? Resource::State::downloaded
+                       : Resource::State::availFail,
+                       std::memory_order_release);
     }
     else if (startsWith(r->name, "file://"))
     {
         r->fetch->reply.content = readLocalFileBuffer(r->name.substr(7));
-        r->state = Resource::State::downloaded;
         r->fetch->reply.code = 200;
+        r->state.store(Resource::State::downloaded,
+                       std::memory_order_release);
     }
     else if (startsWith(r->name, "internal://"))
     {
         r->fetch->reply.content = readInternalMemoryBuffer(r->name.substr(11));
-        r->state = Resource::State::downloaded;
         r->fetch->reply.code = 200;
+        r->state.store(Resource::State::downloaded,
+                       std::memory_order_release);
     }
     else if (startsWith(r->name, "generate://"))
     {
-        r->state = Resource::State::errorRetry;
+        r->state.store(Resource::State::errorRetry,
+                       std::memory_order_release);
         // will be handled elsewhere
     }
     else
     {
-        r->state = Resource::State::startDownload;
+        r->state.store(Resource::State::startDownload,
+                       std::memory_order_release);
         // will be handled in main thread
     }
 
-    if (r->state == Resource::State::downloaded)
+    if (r->state.load(std::memory_order_relaxed)
+            == Resource::State::downloaded)
         resources.queUpload.push(r);
 }
 
@@ -311,7 +322,7 @@ void MapImpl::cacheReadProcess(const std::shared_ptr<Resource> &r)
 void MapImpl::resourcesDownloadsEntry()
 {
     resources.fetcher->initialize();
-    while (!resources.fetching.stop)
+    while (!resources.fetching.stop.load(std::memory_order_relaxed))
     {
         std::vector<std::weak_ptr<Resource>> res1;
         {
@@ -319,7 +330,8 @@ void MapImpl::resourcesDownloadsEntry()
             resources.fetching.con.wait(lock);
             res1.swap(resources.fetching.resources);
         }
-        if (resources.downloads >= options.maxConcurrentDownloads)
+        if (resources.downloads.load(std::memory_order_relaxed)
+                >= options.maxConcurrentDownloads)
             continue; // skip processing if no download slots are available
         typedef std::pair<float, std::shared_ptr<Resource>> PR;
         std::vector<PR> res;
@@ -338,11 +350,13 @@ void MapImpl::resourcesDownloadsEntry()
         });
         for (auto &pr : res)
         {
-            if (resources.downloads >= options.maxConcurrentDownloads)
+            if (resources.downloads.load(std::memory_order_relaxed)
+                    >= options.maxConcurrentDownloads)
                 break;
             std::shared_ptr<Resource> r = pr.second;
-            r->state = Resource::State::downloading;
-            resources.downloads++;
+            r->state.store(Resource::State::downloading,
+                           std::memory_order_relaxed);
+            resources.downloads.fetch_add(1, std::memory_order_relaxed);
             LOG(debug) << "Initializing fetch of <" << r->name << ">";
             r->fetch->query.headers["X-Vts-Client-Id"]
                     = createOptions.clientId;
@@ -417,7 +431,8 @@ void MapImpl::resourcesRemoveOld()
             Res r(it.first,
                 it.second->info.ramMemoryCost + it.second->info.gpuMemoryCost,
                 it.second->lastAccessTick);
-            if (it.second->state == Resource::State::ready)
+            if (it.second->state.load(std::memory_order_relaxed)
+                    == Resource::State::ready)
                 loadedToRemove.push_back(std::move(r));
             else
                 loadingToRemove.push_back(std::move(r));
@@ -460,14 +475,15 @@ void MapImpl::resourcesCheckInitialized()
         const std::shared_ptr<Resource> &r = it.second;
         if (r->lastAccessTick + 1 != renderer.tickIndex)
             continue; // skip resources that were not accessed last tick
-        switch ((Resource::State)r->state)
+        switch (r->state.load(std::memory_order_acquire))
         {
         case Resource::State::errorRetry:
             if (r->retryNumber >= options.maxFetchRetries)
             {
                 LOG(err3) << "All retries for resource <"
                     << r->name << "> has failed";
-                r->state = Resource::State::errorFatal;
+                r->state.store(Resource::State::errorFatal,
+                               std::memory_order_relaxed);
                 statistics.resourcesFailed++;
                 break;
             }
@@ -489,7 +505,8 @@ void MapImpl::resourcesCheckInitialized()
             r->retryTime = -1;
             UTILITY_FALLTHROUGH;
         case Resource::State::initializing:
-            r->state = Resource::State::checkCache;
+            r->state.store(Resource::State::checkCache,
+                           std::memory_order_relaxed);
             resources.queCacheRead.push(r);
             break;
         default:
@@ -500,7 +517,8 @@ void MapImpl::resourcesCheckInitialized()
 
 void MapImpl::resourcesStartDownloads()
 {
-    if (resources.downloads >= options.maxConcurrentDownloads)
+    if (resources.downloads.load(std::memory_order_relaxed)
+            >= options.maxConcurrentDownloads)
         return; // early exit
     std::vector<std::weak_ptr<Resource>> res;
     for (auto it : resources.resources)
@@ -508,7 +526,8 @@ void MapImpl::resourcesStartDownloads()
         const std::shared_ptr<Resource> &r = it.second;
         if (r->lastAccessTick + 1 != renderer.tickIndex)
             continue; // skip resources that were not accessed last tick
-        if (r->state == Resource::State::startDownload)
+        if (r->state.load(std::memory_order_relaxed)
+                == Resource::State::startDownload)
             res.push_back(r);
     }
     {
@@ -524,7 +543,7 @@ void MapImpl::resourcesUpdateStatistics()
     for (auto &rp : resources.resources)
     {
         std::shared_ptr<Resource> &r = rp.second;
-        switch ((Resource::State)r->state)
+        switch (r->state.load(std::memory_order_relaxed))
         {
         case Resource::State::initializing:
         case Resource::State::checkCache:
@@ -542,7 +561,8 @@ void MapImpl::resourcesUpdateStatistics()
         }
     }
     statistics.resourcesActive = resources.resources.size();
-    statistics.resourcesDownloading = resources.downloads;
+    statistics.resourcesDownloading
+            = resources.downloads.load(std::memory_order_relaxed);
 }
 
 void MapImpl::resourceRenderInitialize()

@@ -65,7 +65,8 @@ FetchTask::ResourceType GeodataStylesheet::resourceType() const
 GpuGeodata::GpuGeodata(MapImpl *map, const std::string &name)
     : Resource(map, name), lod(0)
 {
-    state = Resource::State::ready;
+    state.store(Resource::State::ready,
+                std::memory_order_release);
 }
 
 using Json::Value;
@@ -561,7 +562,8 @@ struct geoContext
             std::shared_ptr<GpuMesh> gm = std::make_shared<GpuMesh>(data->map,
                 data->name + "#$!lines");
             data->map->callbacks.loadMesh(gm->info, spec);
-            gm->state = Resource::State::ready;
+            gm->state.store(Resource::State::ready,
+                            std::memory_order_release);
 
             RenderTask task;
             task.mesh = gm;
@@ -703,10 +705,12 @@ FetchTask::ResourceType GpuGeodata::resourceType() const
 
 void GpuGeodata::update(const std::string &s, const std::string &f, uint32 l)
 {
-    switch ((Resource::State)state)
+    switch (state.load(std::memory_order_acquire))
     {
     case Resource::State::initializing:
-        state = Resource::State::ready; // if left in initializing, it would attempt to download it
+        // if left in initializing, it would attempt to download it
+        state.store(Resource::State::ready,
+                    std::memory_order_relaxed);
         UTILITY_FALLTHROUGH;
     case Resource::State::errorFatal: // allow reloading when sources change, even if it failed before
     case Resource::State::ready:
@@ -715,7 +719,8 @@ void GpuGeodata::update(const std::string &s, const std::string &f, uint32 l)
             style = s;
             features = f;
             lod = l;
-            state = Resource::State::downloaded;
+            state.store(Resource::State::downloaded,
+                        std::memory_order_release);
         }
         break;
     default:

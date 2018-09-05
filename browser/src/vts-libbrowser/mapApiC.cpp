@@ -1271,14 +1271,14 @@ void vtsSearchDestroy(vtsHSearch search)
 bool vtsSearchDone(vtsHSearch search)
 {
     C_BEGIN
-    return search->p->done;
+    return search->p->done.load(std::memory_order_acquire);
     C_END
     return false;
 }
 
 uint32 vtsSearchResultsCount(vtsHSearch search)
 {
-    assert((bool)search->p->done);
+    assert(search->p->done.load(std::memory_order_relaxed));
     C_BEGIN
     return search->p->results.size();
     C_END
@@ -1287,7 +1287,7 @@ uint32 vtsSearchResultsCount(vtsHSearch search)
 
 const char *vtsSearchResultData(vtsHSearch search, uint32 index)
 {
-    assert((bool)search->p->done);
+    assert(search->p->done.load(std::memory_order_relaxed));
     C_BEGIN
     return vts::retStr(search->p->results[index].toJson());
     C_END

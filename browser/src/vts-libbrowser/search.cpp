@@ -157,7 +157,7 @@ double vtod(Json::Value &v)
 
 void parseSearchResults(MapImpl *map, const std::shared_ptr<SearchTask> &task)
 {
-    assert(!task->done);
+    assert(!task->done.load(std::memory_order_relaxed));
     try
     {
         Json::Value root;
@@ -328,7 +328,7 @@ void MapImpl::updateSearch()
                 parseSearchResults(this, t);
                 break;
             }
-            t->done = true;
+            t->done.store(true, std::memory_order_release);
         }
         it = resources.searchTasks.erase(it);
     }

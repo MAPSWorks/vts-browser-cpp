@@ -130,7 +130,8 @@ void MeshAggregate::load()
         sprintf(tmp, "%d", mi);
         std::shared_ptr<GpuMesh> gm = std::make_shared<GpuMesh>(map,
             name + "#$!" + tmp);
-        gm->state = Resource::State::errorFatal;
+        gm->state.store(Resource::State::errorFatal,
+                        std::memory_order_relaxed);
 
         uint32 vertexSize = sizeof(vec3f);
         if (m.tc.size())
@@ -247,7 +248,8 @@ void MeshAggregate::load()
         }
 
         map->callbacks.loadMesh(gm->info, spec);
-        gm->state = Resource::State::ready;
+        gm->state.store(Resource::State::ready,
+                        std::memory_order_release);
     }
 
     // memory consumption
